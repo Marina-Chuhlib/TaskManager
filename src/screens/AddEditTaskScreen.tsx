@@ -30,6 +30,7 @@ import { STORAGE_KEYS } from '../utils/storage';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { addCustomCategory } from '../store/slices/categoriesSlice';
 import type { RootState } from '../store/store';
+import { uploadPhotoToImgbb } from '../utils/uploadPhotoToImgbb';
 
 const isDeadlineBeforeToday = (deadlineIso: string): boolean => {
 	const dayPart = deadlineIso.split('T')[0];
@@ -144,6 +145,12 @@ const AddEditTaskScreen: React.FC = () => {
 					(prev.data() as Task | undefined)?.completed ?? false;
 			}
 
+			let finalImageUrl = imageUrl;
+
+			if (localImageUri) {
+				finalImageUrl = await uploadPhotoToImgbb(localImageUri);
+			}
+
 			const taskData: Task = {
 				id,
 				title: title.trim(),
@@ -153,7 +160,7 @@ const AddEditTaskScreen: React.FC = () => {
 				completed,
 				updatedAt: Date.now(),
 				category,
-				imageUrl: localImageUri,
+				imageUrl: finalImageUrl || '',
 			};
 
 			if (taskId) {
@@ -162,6 +169,7 @@ const AddEditTaskScreen: React.FC = () => {
 				await addTask(taskData).unwrap();
 				await AsyncStorage.removeItem(STORAGE_KEYS.DRAFT_TASK);
 			}
+
 			navigation.goBack();
 		} catch (err) {
 			Alert.alert('Error', 'Failed to save the task');
@@ -217,6 +225,19 @@ const AddEditTaskScreen: React.FC = () => {
 				<Text>Attachment</Text>
 				{localImageUri || imageUrl ? (
 					<View style={{ alignItems: 'center' }}>
+						<Pressable
+							style={({ pressed }) => [
+								styles.secondaryBtn,
+								pressed && styles.buttonPressed,
+								{ marginLeft: 'auto', marginRight: 20 },
+							]}
+							onPress={() => {
+								setLocalImageUri(undefined);
+								setImageUrl(undefined);
+							}}
+						>
+							<Text style={styles.secondaryBtnText}>❌</Text>
+						</Pressable>
 						<Image
 							source={{ uri: localImageUri || imageUrl }}
 							style={styles.preview}

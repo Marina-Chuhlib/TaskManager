@@ -56,7 +56,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 							  (item.description.length > 90 ? '…' : '')}
 					</Text>
 
-					{item.description.length > 80 && (
+					{item.description.length > 90 && (
 						<TouchableOpacity
 							style={styles.showMoreBtn}
 							onPress={() => setIsExpanded(!isExpanded)}
