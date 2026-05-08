@@ -11,6 +11,7 @@ import {
 	ScrollView,
 	Image,
 } from 'react-native';
+import { useForm, Controller } from 'react-hook-form';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Task, Priority } from '../entities/task/types';
@@ -42,37 +43,48 @@ const isDeadlineBeforeToday = (deadlineIso: string): boolean => {
 	return deadlineDay < today;
 };
 
+type TaskFormValues = {
+	title: string;
+	description?: string;
+	priority: Priority;
+	deadline: string;
+	category: string;
+	imageUrl?: string;
+};
+
 const AddEditTaskScreen: React.FC = () => {
 	const navigation =
 		useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const route = useRoute<any>();
 	const taskId = route.params?.taskId;
 	const dispatch = useDispatch();
-
 	const customCategories = useSelector((s: RootState) => s.categories.custom);
 
-	const [title, setTitle] = useState('');
-	const [description, setDescription] = useState('');
-	const [priority, setPriority] = useState<Priority>('low');
-	const [deadline, setDeadline] = useState('');
-	const [category, setCategory] = useState('Other');
-	const [imageUrl, setImageUrl] = useState<string | undefined>();
 	const [localImageUri, setLocalImageUri] = useState<string | undefined>();
-
 	const [addTask] = useAddTaskMutation();
 	const [updateTask] = useUpdateTaskMutation();
+
+	const { control, handleSubmit, setValue, watch } = useForm<TaskFormValues>({
+		defaultValues: {
+			title: '',
+			description: '',
+			priority: 'low',
+			deadline: '',
+			category: 'Other',
+			imageUrl: undefined,
+		},
+	});
+
+	const watchedValues = watch();
 
 	useEffect(() => {
 		if (!taskId) {
 			AsyncStorage.getItem(STORAGE_KEYS.DRAFT_TASK).then(draft => {
 				if (draft) {
 					const t = JSON.parse(draft) as Partial<Task>;
-					setTitle(t.title || '');
-					setDescription(t.description || '');
-					setPriority(t.priority || 'low');
-					setDeadline(t.deadline || '');
-					setCategory(t.category || 'Other');
-					setImageUrl(t.imageUrl);
+					Object.entries(t).forEach(([key, val]) => {
+						setValue(key as keyof TaskFormValues, val);
+					});
 				}
 			});
 			return;
@@ -84,54 +96,48 @@ const AddEditTaskScreen: React.FC = () => {
 			.onSnapshot(doc => {
 				if (doc.exists()) {
 					const t = doc.data() as Task;
-					setTitle(t.title);
-					setDescription(t.description || '');
-					setPriority(t.priority || 'low');
-					setDeadline(t.deadline || '');
-					setCategory(t.category || 'Other');
-					setImageUrl(t.imageUrl);
+					Object.entries({
+						title: t.title,
+						description: t.description,
+						priority: t.priority,
+						deadline: t.deadline,
+						category: t.category,
+						imageUrl: t.imageUrl,
+					}).forEach(([key, val]) => {
+						setValue(key as keyof TaskFormValues, val);
+					});
 					setLocalImageUri(undefined);
 				}
 			});
 
 		return () => unsubscribe();
-	}, [taskId]);
+	}, [taskId, setValue]);
 
 	useEffect(() => {
 		if (!taskId) {
-			const draft: Partial<Task> = {
-				title,
-				description,
-				priority,
-				deadline,
-				category,
-				imageUrl,
-			};
 			AsyncStorage.setItem(
 				STORAGE_KEYS.DRAFT_TASK,
-				JSON.stringify(draft)
+				JSON.stringify(watchedValues)
 			);
 		}
-	}, [title, description, priority, deadline, category, imageUrl, taskId]);
+	}, [watchedValues, taskId]);
 
 	const pickImage = () => {
 		launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 }, res => {
 			const uri = res.assets?.[0]?.uri;
 			if (uri) {
 				setLocalImageUri(uri);
-				setImageUrl(undefined);
+				setValue('imageUrl', undefined);
 			}
 		});
 	};
 
-	const handleSave = async () => {
-		if (!title.trim()) {
+	const onSubmit = async (data: TaskFormValues) => {
+		if (!data.title.trim())
 			return Alert.alert('Validation', 'Please enter a title');
-		}
-		if (!deadline.trim()) {
+		if (!data.deadline.trim())
 			return Alert.alert('Validation', 'Please select a deadline');
-		}
-		if (!taskId && isDeadlineBeforeToday(deadline)) {
+		if (!taskId && isDeadlineBeforeToday(data.deadline)) {
 			return Alert.alert('Validation', 'Deadline cannot be in the past');
 		}
 
@@ -145,27 +151,24 @@ const AddEditTaskScreen: React.FC = () => {
 					(prev.data() as Task | undefined)?.completed ?? false;
 			}
 
-			let finalImageUrl = imageUrl;
-
-			if (localImageUri) {
+			let finalImageUrl = data.imageUrl;
+			if (localImageUri)
 				finalImageUrl = await uploadPhotoToImgbb(localImageUri);
-			}
 
 			const taskData: Task = {
 				id,
-				title: title.trim(),
-				description: description.trim() || undefined,
-				priority,
-				deadline,
+				title: data.title.trim(),
+				description: data.description?.trim(),
+				priority: data.priority,
+				deadline: data.deadline,
 				completed,
 				updatedAt: Date.now(),
-				category,
+				category: data.category,
 				imageUrl: finalImageUrl || '',
 			};
 
-			if (taskId) {
-				await updateTask(taskData).unwrap();
-			} else {
+			if (taskId) await updateTask(taskData).unwrap();
+			else {
 				await addTask(taskData).unwrap();
 				await AsyncStorage.removeItem(STORAGE_KEYS.DRAFT_TASK);
 			}
@@ -188,42 +191,80 @@ const AddEditTaskScreen: React.FC = () => {
 				showsVerticalScrollIndicator={false}
 			>
 				<Text>Title</Text>
-				<TextInput
-					style={styles.input}
-					placeholder="Title"
-					value={title}
-					onChangeText={setTitle}
+				<Controller
+					control={control}
+					name="title"
+					render={({ field: { value, onChange } }) => (
+						<TextInput
+							style={styles.input}
+							placeholder="Title"
+							value={value}
+							onChangeText={onChange}
+						/>
+					)}
 				/>
 
 				<Text>Deadline</Text>
-				<DeadlinePicker deadline={deadline} setDeadline={setDeadline} />
+				<Controller
+					control={control}
+					name="deadline"
+					render={({ field: { value, onChange } }) => (
+						<DeadlinePicker
+							deadline={value}
+							setDeadline={onChange}
+						/>
+					)}
+				/>
+
 				<Text>Priority</Text>
-				<PriorityPicker priority={priority} setPriority={setPriority} />
+				<Controller
+					control={control}
+					name="priority"
+					render={({ field: { value, onChange } }) => (
+						<PriorityPicker
+							priority={value}
+							setPriority={onChange}
+						/>
+					)}
+				/>
+
 				<Text>Category</Text>
-				<CategoryPicker
-					category={category}
-					setCategory={setCategory}
-					customCategories={customCategories}
-					onAddCustomCategory={name =>
-						dispatch(addCustomCategory(name))
-					}
+				<Controller
+					control={control}
+					name="category"
+					render={({ field: { value, onChange } }) => (
+						<CategoryPicker
+							category={value}
+							setCategory={onChange}
+							customCategories={customCategories}
+							onAddCustomCategory={name =>
+								dispatch(addCustomCategory(name))
+							}
+						/>
+					)}
 				/>
 
 				<Text>Description</Text>
-				<TextInput
-					style={[
-						styles.input,
-						{ height: 140, textAlignVertical: 'top' },
-					]}
-					placeholder="Description"
-					value={description}
-					onChangeText={setDescription}
-					multiline
-					maxLength={200}
+				<Controller
+					control={control}
+					name="description"
+					render={({ field: { value, onChange } }) => (
+						<TextInput
+							style={[
+								styles.input,
+								{ height: 140, textAlignVertical: 'top' },
+							]}
+							placeholder="Description"
+							value={value}
+							onChangeText={onChange}
+							multiline
+							maxLength={200}
+						/>
+					)}
 				/>
 
 				<Text>Attachment</Text>
-				{localImageUri || imageUrl ? (
+				{(localImageUri || watchedValues.imageUrl) && (
 					<View style={{ alignItems: 'center' }}>
 						<Pressable
 							style={({ pressed }) => [
@@ -233,19 +274,20 @@ const AddEditTaskScreen: React.FC = () => {
 							]}
 							onPress={() => {
 								setLocalImageUri(undefined);
-								setImageUrl(undefined);
+								setValue('imageUrl', undefined);
 							}}
 						>
 							<Text style={styles.secondaryBtnText}>❌</Text>
 						</Pressable>
 						<Image
-							source={{ uri: localImageUri || imageUrl }}
+							source={{
+								uri: localImageUri || watchedValues.imageUrl,
+							}}
 							style={styles.preview}
-							// resizeMode="cover"
 							resizeMode="contain"
 						/>
 					</View>
-				) : null}
+				)}
 				<Pressable
 					style={({ pressed }) => [
 						styles.secondaryBtn,
@@ -254,7 +296,7 @@ const AddEditTaskScreen: React.FC = () => {
 					onPress={pickImage}
 				>
 					<Text style={styles.secondaryBtnText}>
-						{localImageUri || imageUrl
+						{localImageUri || watchedValues.imageUrl
 							? 'Change image'
 							: '+ Add image'}
 					</Text>
@@ -265,7 +307,7 @@ const AddEditTaskScreen: React.FC = () => {
 						styles.button,
 						pressed && styles.buttonPressed,
 					]}
-					onPress={handleSave}
+					onPress={handleSubmit(onSubmit)}
 				>
 					<Text style={styles.buttonText}>Save</Text>
 				</Pressable>
